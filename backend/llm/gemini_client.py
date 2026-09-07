@@ -52,7 +52,7 @@ _client = genai.Client(api_key=_api_key)
 #                              Critical for gemini-3.5-flash which does visible thinking.
 _gen_config = types.GenerateContentConfig(
     temperature=0.1,
-    max_output_tokens=2048,
+    max_output_tokens=4096,
     response_mime_type="application/json",
 )
 

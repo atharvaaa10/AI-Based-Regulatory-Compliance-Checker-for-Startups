@@ -27,9 +27,9 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from backend.config.loader import load_checklist, load_prompt_template
+from backend.config.loader import load_checklist, load_prompt_template, load_batched_prompt_template
 from backend.llm.gemini_client import call_model_a, call_model_b, MODEL_A_NAME, MODEL_B_NAME
-from backend.llm.prompt_builder import build_prompt
+from backend.llm.prompt_builder import build_prompt, build_batched_prompt
 from backend.rag.retriever import retrieve_relevant_clauses
 from backend.schemas.models import (
     AgreementDetail,
@@ -42,22 +42,13 @@ from backend.schemas.models import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Free-tier rate limit for gemini-3.7-flash: 5 requests per minute.
-# With 2 concurrent model calls per item, sleeping 13s between items
-# keeps each model under 5 RPM (60s / 13s ≈ 4.6 calls/min).
-_INTER_ITEM_DELAY_SECONDS = 13
-
-
 # ---------------------------------------------------------------------------
 # Rate-limit retry helper
 # ---------------------------------------------------------------------------
 
 def _call_with_retry(fn, prompt: str, max_retries: int = 3) -> str:
     """
-    Call a Gemini API function, retrying on 429 rate-limit errors.
-
-    Extracts the retry_delay from the error message when available,
-    otherwise falls back to exponential backoff (30s, 60s, 90s).
+    Call a Gemini API function, retrying on 429 rate-limit errors and 503 transient spikes.
     """
     for attempt in range(max_retries):
         try:
@@ -80,7 +71,6 @@ def _call_with_retry(fn, prompt: str, max_retries: int = 3) -> str:
                 raise
 
             if is_rate_limit:
-                # Try to extract the suggested retry_delay from the error
                 delay_match = (
                     re.search(r"retryDelay':\s*'(\d+)", err_str)
                     or re.search(r"Please retry in (\d+(?:\.\d+)?)s", err_str)
@@ -102,74 +92,129 @@ def _call_with_retry(fn, prompt: str, max_retries: int = 3) -> str:
 
     raise RuntimeError("Exceeded max retries for Gemini API call")
 
+
 # ---------------------------------------------------------------------------
 # JSON extraction helpers
 # ---------------------------------------------------------------------------
 
-def _extract_json(raw: str) -> dict:
+def _extract_json_array(raw: str) -> list[dict]:
     """
-    Parse the model's response as JSON.
-
-    Models sometimes wrap JSON in markdown code fences or add preamble text.
-    This function handles both the clean case and the wrapped case.
+    Parse the model's batched response into a list of JSON dicts.
+    Handles raw JSON arrays, code-fenced JSON arrays, wrapped objects like {"results": [...]},
+    or embedded array blocks.
     """
     text = raw.strip()
-
-    # Remove markdown code fences if present (```json ... ``` or ``` ... ```)
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     text = text.strip()
 
-    # Try direct parse first
     res = None
     try:
         res = json.loads(text)
     except json.JSONDecodeError:
-        # Fallback: find the first {...} block in the response
-        match = re.search(r"\{.*\}", text, re.DOTALL)
+        match = re.search(r"\[\s*\{.*\}\s*\]", text, re.DOTALL)
         if match:
             try:
                 res = json.loads(match.group())
             except json.JSONDecodeError:
                 pass
+        if res is None:
+            match_obj = re.search(r"\{.*\}", text, re.DOTALL)
+            if match_obj:
+                try:
+                    res = json.loads(match_obj.group())
+                except json.JSONDecodeError:
+                    pass
 
-    if isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
-        return res[0]
+    # If wrapped in a dict e.g. {"results": [...]}
     if isinstance(res, dict):
-        return res
+        for val in res.values():
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+                return val
 
-    raise ValueError(f"No valid JSON found in model response: {text[:300]!r}")
+    if isinstance(res, list):
+        return [item for item in res if isinstance(item, dict)]
+
+    raise ValueError(f"No valid JSON array found in model response: {text[:300]!r}")
 
 
-def _parse_result(item: dict, raw: str) -> ChecklistItemResult:
+def _parse_batched_results(
+    checklist: list[dict],
+    raw: str,
+) -> list[ChecklistItemResult]:
     """
-    Convert a raw model response string into a ChecklistItemResult.
-
-    On any parse failure, returns a safe fallback result so that one
-    bad model response doesn't crash the entire /check request.
+    Convert a raw batched model response string into a list of ChecklistItemResult objects.
+    Maps results to checklist items by item['id'] first, with index-based fallback.
+    Provides robust per-item defaults on any individual item parse anomaly.
     """
     try:
-        data = _extract_json(raw)
-        return ChecklistItemResult(
-            id=item["id"],
-            requirement=item["requirement"],
-            status=data.get("status", "Missing"),
-            cited_sections=data.get("cited_sections", []),
-            reason=data.get("reason", "Model returned an unparseable response."),
-            suggested_fix=data.get("suggested_fix") or None,
-            confidence=max(0, min(100, int(data.get("confidence", 50)))),
-        )
+        items_data = _extract_json_array(raw)
     except Exception as exc:
-        logger.warning("Failed to parse model response for item '%s': %s", item["id"], exc)
-        return ChecklistItemResult(
-            id=item["id"],
-            requirement=item["requirement"],
-            status="Missing",
-            cited_sections=[],
-            reason=f"Error parsing model response: {exc}",
-            suggested_fix="Please retry this check — the model returned an unexpected format.",
-            confidence=0,
+        logger.warning("Failed to extract JSON array from batched response: %s", exc)
+        items_data = []
+
+    by_id = {
+        d.get("id"): d
+        for d in items_data
+        if isinstance(d, dict) and d.get("id")
+    }
+
+    results: list[ChecklistItemResult] = []
+    for idx, item in enumerate(checklist):
+        item_id = item["id"]
+        req_text = item["requirement"]
+
+        # 1. Lookup by ID
+        data = by_id.get(item_id)
+        # 2. Fallback to index if available
+        if not data and idx < len(items_data) and isinstance(items_data[idx], dict):
+            data = items_data[idx]
+
+        if not data:
+            results.append(
+                ChecklistItemResult(
+                    id=item_id,
+                    requirement=req_text,
+                    status="Missing",
+                    cited_sections=[],
+                    reason="Model response omitted this checklist item.",
+                    suggested_fix="Please retry evaluation — item was missing from batched output.",
+                    confidence=0,
+                )
+            )
+            continue
+
+        raw_status = str(data.get("status", "Missing")).strip()
+        status = "Missing"
+        for candidate in ("Met", "Partially Met", "Missing"):
+            if raw_status.lower() == candidate.lower():
+                status = candidate
+                break
+
+        cited = data.get("cited_sections", [])
+        if isinstance(cited, str):
+            cited = [cited]
+        cited_sections = [str(c).strip() for c in cited if str(c).strip()]
+
+        raw_conf = data.get("confidence", 50)
+        try:
+            confidence = max(0, min(100, int(raw_conf)))
+        except (ValueError, TypeError):
+            confidence = 50
+
+        results.append(
+            ChecklistItemResult(
+                id=item_id,
+                requirement=req_text,
+                status=status,
+                cited_sections=cited_sections,
+                reason=str(data.get("reason", "")).strip() or "No specific reason provided.",
+                suggested_fix=str(data.get("suggested_fix", "")).strip() or None if status != "Met" else None,
+                confidence=confidence,
+            )
         )
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -199,63 +244,58 @@ def _compute_score(results: list[ChecklistItemResult]) -> float:
 @router.post(
     "/check",
     response_model=ComplianceResponse,
-    summary="Check a privacy policy against the DPDP Act 2023",
+    summary="Check a privacy policy against the DPDP Act 2023 (Batched)",
     description=(
-        "Accepts a startup's privacy policy text and evaluates it against "
-        "15 DPDP Act 2023 compliance requirements using two Gemini models in parallel. "
+        "Accepts a startup's privacy policy text and evaluates it against all "
+        "15 DPDP Act 2023 compliance requirements in a single batched prompt per model. "
         "Returns per-item verdicts, weighted scores, and a model agreement rate."
     ),
 )
 def check_compliance(request: ComplianceRequest) -> ComplianceResponse:
     checklist = load_checklist()
-    template  = load_prompt_template()
+    template  = load_batched_prompt_template()
 
-    results_a: list[ChecklistItemResult] = []
-    results_b: list[ChecklistItemResult] = []
-
+    # Step 1: Pre-retrieve relevant clauses for all 15 checklist items
+    item_clauses_map: dict[str, list[dict]] = {}
     for item in checklist:
-        logger.info("Checking item: %s", item["id"])
+        item_clauses_map[item["id"]] = retrieve_relevant_clauses(item["query"], top_k=4)
 
-        # Step 1: Retrieve top-5 relevant DPDP Act clauses
-        clauses = retrieve_relevant_clauses(item["query"], top_k=5)
+    # Step 2: Build single comprehensive batched prompt
+    batched_prompt = build_batched_prompt(
+        template,
+        checklist,
+        item_clauses_map,
+        request.policy_text,
+    )
 
-        # Step 2: Build grounded prompt
-        prompt = build_prompt(template, item["requirement"], clauses, request.policy_text)
+    # Step 3: Call both models in parallel (1 call per model!)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_a = executor.submit(_call_with_retry, call_model_a, batched_prompt)
+            future_b = executor.submit(_call_with_retry, call_model_b, batched_prompt)
+            raw_a = future_a.result(timeout=120)
+            raw_b = future_b.result(timeout=120)
+    except concurrent.futures.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Gemini API timed out during compliance evaluation. Please retry.",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gemini API error: {exc}",
+        )
 
-        # Step 3: Call both models concurrently, with retry on 429
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                future_a = executor.submit(_call_with_retry, call_model_a, prompt)
-                future_b = executor.submit(_call_with_retry, call_model_b, prompt)
-                raw_a = future_a.result(timeout=120)
-                raw_b = future_b.result(timeout=120)
-        except concurrent.futures.TimeoutError:
-            raise HTTPException(
-                status_code=504,
-                detail=f"Gemini API timed out on checklist item '{item['id']}'. Please retry.",
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Gemini API error on item '{item['id']}': {exc}",
-            )
+    # Step 4: Parse batched response JSON arrays into ChecklistItemResult lists
+    results_a = _parse_batched_results(checklist, raw_a)
+    results_b = _parse_batched_results(checklist, raw_b)
 
-        # Step 3b: Rate-limit delay — keeps us under 5 RPM on free tier
-        # (skip delay after the last item)
-        if item is not checklist[-1]:
-            logger.info("Rate-limit delay: sleeping %ss before next item", _INTER_ITEM_DELAY_SECONDS)
-            time.sleep(_INTER_ITEM_DELAY_SECONDS)
-
-        # Step 4: Parse responses
-        results_a.append(_parse_result(item, raw_a))
-        results_b.append(_parse_result(item, raw_b))
-
-    # Step 5: Agreement rate
+    # Step 5: Calculate agreement rate
     n = len(checklist)
     matched = sum(1 for a, b in zip(results_a, results_b) if a.status == b.status)
     agreement_rate = round(matched / n, 4) if n else 0.0
 
-    # Step 6: Disagreement list
+    # Step 6: Identify disagreements
     disagreements = [
         AgreementDetail(
             item_id=a.id,

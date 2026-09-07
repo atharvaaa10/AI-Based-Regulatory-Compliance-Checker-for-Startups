@@ -16,8 +16,9 @@ from pathlib import Path
 _CONFIG_DIR  = Path(__file__).parent
 _PROJECT_DIR = _CONFIG_DIR.parents[1]   # project root (two levels up from config/)
 
-CHECKLIST_PATH      = _CONFIG_DIR  / "checklist.json"
-PROMPT_TEMPLATE_PATH = _PROJECT_DIR / "prompts" / "prompt_template.txt"
+CHECKLIST_PATH               = _CONFIG_DIR  / "checklist.json"
+PROMPT_TEMPLATE_PATH         = _PROJECT_DIR / "prompts" / "prompt_template.txt"
+PROMPT_TEMPLATE_BATCHED_PATH = _PROJECT_DIR / "prompts" / "prompt_template_batched.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +41,13 @@ def load_checklist() -> list[dict]:
 
 def load_prompt_template() -> str:
     """
-    Return the raw prompt template string with three placeholders:
-        {requirement}       — the checklist item requirement text
-        {retrieved_clauses} — formatted retrieved DPDP Act clauses
-        {policy_text}       — the startup's pasted privacy policy
+    Return the raw single-item prompt template string.
     """
     return PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def load_batched_prompt_template() -> str:
+    """
+    Return the raw batched prompt template string (evaluates all 15 items).
+    """
+    return PROMPT_TEMPLATE_BATCHED_PATH.read_text(encoding="utf-8")
