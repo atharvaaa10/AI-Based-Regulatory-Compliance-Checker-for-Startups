@@ -82,5 +82,6 @@ app.include_router(compliance_router, prefix="/api", tags=["Compliance"])
 # ---------------------------------------------------------------------------
 
 @app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 def health():
     return {"status": "ok", "version": app.version}

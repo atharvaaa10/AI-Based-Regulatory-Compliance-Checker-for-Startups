@@ -46,7 +46,7 @@ router = APIRouter()
 # Rate-limit retry helper
 # ---------------------------------------------------------------------------
 
-def _call_with_retry(fn, prompt: str, max_retries: int = 3) -> str:
+def _call_with_retry(fn, prompt: str, max_retries: int = 5) -> str:
     """
     Call a Gemini API function, retrying on 429 rate-limit errors and 503 transient spikes.
     """
@@ -82,7 +82,7 @@ def _call_with_retry(fn, prompt: str, max_retries: int = 3) -> str:
                     attempt + 1, max_retries, sleep_secs,
                 )
             else:
-                sleep_secs = 5 * (attempt + 1)
+                sleep_secs = 7 * (attempt + 1)
                 logger.warning(
                     "Transient server error %s (attempt %d/%d). Sleeping %ds...",
                     exc, attempt + 1, max_retries, sleep_secs,
