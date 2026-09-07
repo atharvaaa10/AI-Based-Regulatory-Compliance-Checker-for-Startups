@@ -1,0 +1,36 @@
+# ============================================================
+# Core RAG dependencies (Phase 1)
+# ============================================================
+
+# Local embedding model — free, no API key, runs on CPU
+# Pinned to 2.7.0 for compatibility with PyTorch 2.2.x.
+# sentence-transformers 3.x requires PyTorch >= 2.5.
+sentence-transformers==2.7.0
+transformers==4.41.2
+
+# Numerical operations + cosine similarity search
+numpy>=1.26,<2.0
+
+# ============================================================
+# Web framework (Phase 2 — install now, use later)
+# ============================================================
+
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# Request/response validation
+pydantic==2.10.3
+
+# Environment variable loading (for GEMINI_API_KEY)
+python-dotenv==1.0.1
+
+# Google Gemini API client
+google-generativeai==0.8.3
+
+# ============================================================
+# Optional — FAISS (for reference / scale-up path)
+# Not used in current code. Mentioned in report as the
+# production-scale alternative to numpy search.
+# Uncomment if you want to experiment:
+# faiss-cpu==1.9.0
+# ============================================================
