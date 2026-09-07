@@ -27,10 +27,11 @@ SEP  = "=" * 72
 ISEP = "-" * 72
 
 # ---------------------------------------------------------------------------
-# QuickCart sample policy
+# ---------------------------------------------------------------------------
+# QuickCart sample policy (Heavily Non-Compliant)
 # ---------------------------------------------------------------------------
 
-SAMPLE_POLICY = """
+SAMPLE_POLICY_QUICKCART = """
 PRIVACY POLICY — QuickCart Technologies Pvt. Ltd.
 
 Last updated: January 2026
@@ -68,13 +69,57 @@ If you have questions about this policy, contact us at
 support@quickcart.example.com.
 """
 
+# ---------------------------------------------------------------------------
+# FinPulse sample policy (Average / Partially Compliant)
+# ---------------------------------------------------------------------------
 
-def run_e2e():
+SAMPLE_POLICY_AVERAGE = """
+PRIVACY POLICY — FinPulse Technologies Pvt. Ltd.
+Last updated: February 2026
+
+FinPulse Technologies ("FinPulse", "we", "us") provides digital expense management and payment solutions. We respect your privacy and process personal data in compliance with the Digital Personal Data Protection Act, 2023.
+
+1. Information We Collect:
+We collect personal data you provide when opening an account: full name, business email address, mobile number, PAN, and transaction logs. We also collect IP addresses and app telemetry to maintain system performance.
+
+2. Purpose and Lawful Grounds:
+Your personal data is collected solely for specified lawful purposes:
+(a) To set up your account and process authorized payment disbursements.
+(b) To verify user identities pursuant to applicable financial regulations.
+(c) To deliver transactional notices, security alerts, and customer support.
+Processing is based on your explicit consent granted at registration or as required to fulfill statutory duties.
+
+3. Consent & Withdrawal:
+We obtain affirmative consent through an explicit opt-in mechanism prior to account activation. You may withdraw your consent at any time by emailing privacy@finpulse.example.com. Withdrawal does not impact processing undertaken prior to the withdrawal request.
+
+4. Data Retention and Deletion:
+We retain personal data only for as long as necessary to fulfill the purposes for which it was collected, or for a mandatory period of 5 years following account closure to comply with legal record-keeping obligations. Thereafter, data is permanently erased or anonymized.
+
+5. Third-Party Service Providers:
+We share personal data strictly with vetted third-party payment gateways and cloud infrastructure providers under legally binding data processing agreements. We do not sell personal data to advertisers.
+
+6. Information Security:
+We maintain administrative, technical, and physical safeguards designed to protect personal data from unauthorized access, loss, or alteration. All financial transactions are protected using TLS 1.3 encryption.
+
+7. Grievance Redressal & Contact:
+If you have concerns or wish to file a grievance regarding our data processing practices, contact our designated Grievance Officer:
+Name: Ananya Roy
+Designation: Grievance Officer
+Email: grievance@finpulse.example.com
+Address: FinPulse Tech Park, Koramangala, Bangalore 560034.
+We endeavor to review and resolve all written grievances within 30 days of receipt.
+
+8. Cross-Border Data Transfers:
+All customer personal data is hosted and stored on secure servers located within India. We do not transfer personal data outside the territory of India.
+"""
+
+
+def evaluate_policy(policy_name: str, policy_text: str):
     checklist = load_checklist()
     template  = load_prompt_template()
 
     print(f"\n{SEP}")
-    print(f"  E2E TEST — QuickCart Technologies Privacy Policy")
+    print(f"  E2E TEST — {policy_name}")
     print(f"  {len(checklist)} checklist items | Models: {MODEL_A_NAME} vs {MODEL_B_NAME}")
     print(SEP)
 
@@ -87,7 +132,7 @@ def run_e2e():
         print(f"\n  [{idx:02d}/{len(checklist)}] {item['id']} ... ", end="", flush=True)
 
         clauses   = retrieve_relevant_clauses(item["query"], top_k=5)
-        prompt    = build_prompt(template, item["requirement"], clauses, SAMPLE_POLICY)
+        prompt    = build_prompt(template, item["requirement"], clauses, policy_text)
         ctx_sids  = [c["section_id"] for c in clauses]   # valid section IDs for citation check
 
         try:
@@ -248,7 +293,15 @@ def run_e2e():
     print("  RAW JSON RESPONSE:")
     print(ISEP)
     print(json.dumps(full_json, indent=2, ensure_ascii=False))
+    return full_json
 
 
 if __name__ == "__main__":
-    run_e2e()
+    target = sys.argv[1] if len(sys.argv) > 1 else "all"
+
+    if target in ("quickcart", "all"):
+        evaluate_policy("QuickCart Technologies (Heavily Non-Compliant)", SAMPLE_POLICY_QUICKCART)
+
+    if target in ("average", "finpulse", "all"):
+        evaluate_policy("FinPulse Technologies (Average / Moderately Compliant)", SAMPLE_POLICY_AVERAGE)
+
