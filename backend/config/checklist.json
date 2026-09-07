@@ -1,0 +1,92 @@
+[
+  {
+    "id": "purpose_specification",
+    "requirement": "Policy must clearly state the specific purpose(s) for which personal data is collected and processed.",
+    "query": "specified purpose for collecting and processing personal data",
+    "sections_hint": ["Section 4", "Section 5", "Section 6"]
+  },
+  {
+    "id": "consent_mechanism",
+    "requirement": "Policy must describe how free, specific, informed, unconditional, and unambiguous consent is obtained from Data Principals before processing their personal data.",
+    "query": "obtaining free informed unambiguous consent from data principal before processing",
+    "sections_hint": ["Section 6"]
+  },
+  {
+    "id": "notice_before_collection",
+    "requirement": "Policy must describe the notice provided to Data Principals before or at the time of data collection, specifying what data is collected and for what purpose.",
+    "query": "notice to data principal before collecting personal data describing purpose",
+    "sections_hint": ["Section 5"]
+  },
+  {
+    "id": "consent_withdrawal",
+    "requirement": "Policy must provide a mechanism for Data Principals to withdraw consent at any time, with ease comparable to how consent was given, and state consequences of withdrawal.",
+    "query": "right to withdraw consent ease of withdrawal cessation of processing",
+    "sections_hint": ["Section 6"]
+  },
+  {
+    "id": "lawful_basis",
+    "requirement": "Policy must identify the lawful basis for each processing activity — either explicit consent from the Data Principal or a specific legitimate use as defined under the Act.",
+    "query": "lawful basis for processing personal data consent or certain legitimate uses",
+    "sections_hint": ["Section 4", "Section 7"]
+  },
+  {
+    "id": "data_minimisation",
+    "requirement": "Policy must state that only personal data strictly necessary for the specified purpose is collected, and that data is not processed beyond that purpose.",
+    "query": "data minimisation only necessary personal data for specified purpose",
+    "sections_hint": ["Section 6"]
+  },
+  {
+    "id": "data_retention_deletion",
+    "requirement": "Policy must state the data retention period and describe how and when personal data is erased or deleted once the purpose is fulfilled or consent is withdrawn.",
+    "query": "data retention period erasure deletion of personal data after purpose fulfilled",
+    "sections_hint": ["Section 8"]
+  },
+  {
+    "id": "security_safeguards",
+    "requirement": "Policy must describe the technical and organisational security safeguards implemented to protect personal data from unauthorised access, breach, or loss.",
+    "query": "reasonable security safeguards to prevent personal data breach technical organisational measures",
+    "sections_hint": ["Section 8"]
+  },
+  {
+    "id": "breach_notification",
+    "requirement": "Policy must state how and within what timeframe Data Principals will be notified in the event of a personal data breach.",
+    "query": "personal data breach notification intimation to data principal board",
+    "sections_hint": ["Section 8"]
+  },
+  {
+    "id": "right_to_access",
+    "requirement": "Policy must describe how Data Principals can obtain a summary of their personal data being processed and the identities of third parties with whom it has been shared.",
+    "query": "right of data principal to access summary of personal data processed and sharing",
+    "sections_hint": ["Section 11"]
+  },
+  {
+    "id": "right_to_correction_erasure",
+    "requirement": "Policy must describe how Data Principals can request correction, completion, updating, or erasure of their personal data held by the organisation.",
+    "query": "right to correction completion updating erasure of personal data request",
+    "sections_hint": ["Section 12"]
+  },
+  {
+    "id": "grievance_redressal",
+    "requirement": "Policy must provide a readily available grievance redressal mechanism with contact details of a Data Protection Officer or designated contact, and commit to responding within a reasonable time.",
+    "query": "grievance redressal mechanism data principal complaints contact data protection officer",
+    "sections_hint": ["Section 13", "Section 8"]
+  },
+  {
+    "id": "children_data_processing",
+    "requirement": "Policy must state whether personal data of children (under 18 years) is processed, and if so, describe how verifiable parental or guardian consent is obtained, and confirm no tracking or targeted advertising is directed at children.",
+    "query": "processing personal data of children verifiable parental guardian consent tracking advertising",
+    "sections_hint": ["Section 9"]
+  },
+  {
+    "id": "third_party_data_sharing",
+    "requirement": "Policy must disclose whether personal data is shared with third-party Data Processors or other Data Fiduciaries, and describe the categories of such entities and the basis for sharing.",
+    "query": "sharing personal data with third party data processors other fiduciaries contract",
+    "sections_hint": ["Section 8", "Section 11"]
+  },
+  {
+    "id": "cross_border_transfer",
+    "requirement": "Policy must state whether personal data is transferred outside India for processing, and under what terms or restrictions such transfer occurs.",
+    "query": "transfer of personal data outside India cross-border processing restriction",
+    "sections_hint": ["Section 16"]
+  }
+]

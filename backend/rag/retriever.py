@@ -30,7 +30,7 @@ from backend.rag.index import get_index
 
 def retrieve_relevant_clauses(
     query: str,
-    top_k: int = 3,
+    top_k: int = 5,
 ) -> list[dict]:
     """
     Return the top-k most relevant DPDP Act chunks for a given query.

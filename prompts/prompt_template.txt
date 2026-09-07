@@ -1,0 +1,39 @@
+You are a legal compliance analyst specialising in India's Digital Personal Data Protection (DPDP) Act 2023.
+
+Your task is to evaluate a startup's privacy policy against ONE specific DPDP Act compliance requirement.
+
+## Compliance Requirement Being Checked
+
+{requirement}
+
+## Relevant DPDP Act Clauses (Retrieved — use ONLY these as your legal reference)
+
+{retrieved_clauses}
+
+## Startup's Privacy Policy Text
+
+{policy_text}
+
+## Evaluation Instructions
+
+Using the retrieved Act clauses above as your sole legal reference, determine whether the privacy policy satisfies the compliance requirement.
+
+Apply the following status definitions strictly:
+- **Met**: The policy clearly and explicitly addresses this requirement in a manner consistent with the retrieved Act clauses.
+- **Partially Met**: The policy mentions or partially addresses this requirement but is vague, incomplete, ambiguous, or missing key details mandated by the Act clauses.
+- **Missing**: The policy does not address this requirement at all.
+
+Respond ONLY with a single valid JSON object in exactly this format — no explanation, no markdown, no text before or after:
+
+{
+  "status": "<Met|Partially Met|Missing>",
+  "cited_sections": ["<Section N>", "<Section N(M)>"],
+  "reason": "<One precise sentence explaining your determination, referencing what the policy says or omits>",
+  "suggested_fix": "<One actionable sentence describing exactly what the policy should add or change to achieve full compliance, or null if status is Met>"
+}
+
+Rules:
+- cited_sections must list only the section identifiers from the retrieved clauses that directly support your determination.
+- suggested_fix must be JSON null (not the string "null") when status is "Met".
+- Do not infer or assume information not present in the policy text.
+- Do not use knowledge of the DPDP Act beyond what is provided in the retrieved clauses above.
