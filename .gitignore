@@ -15,9 +15,10 @@ venv/
 env/
 .env
 
-# Environment variables / secrets
+# Environment variables / secrets — NEVER commit these
 .env
-*.env
+.env.local
+.env.*.local
 
 # RAG embedding cache (auto-regenerated — do not commit large binary files)
 backend/rag/embeddings_cache.npy

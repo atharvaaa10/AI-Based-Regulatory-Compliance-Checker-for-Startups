@@ -29,11 +29,13 @@ Respond ONLY with a single valid JSON object in exactly this format — no expla
   "status": "<Met|Partially Met|Missing>",
   "cited_sections": ["<Section N>", "<Section N(M)>"],
   "reason": "<One precise sentence explaining your determination, referencing what the policy says or omits>",
-  "suggested_fix": "<One actionable sentence describing exactly what the policy should add or change to achieve full compliance, or null if status is Met>"
+  "suggested_fix": "<One actionable sentence describing exactly what the policy should add or change to achieve full compliance, or null if status is Met>",
+  "confidence": <integer from 0 to 100>
 }
 
 Rules:
-- cited_sections must list only the section identifiers from the retrieved clauses that directly support your determination.
+- cited_sections MUST contain ONLY section identifiers taken verbatim from the "[N] Section X" labels in the retrieved clauses above. Never cite, reference, or invent any section number that does not appear in the provided context, even if you know it exists in the Act.
 - suggested_fix must be JSON null (not the string "null") when status is "Met".
+- confidence is your self-assessed certainty in your verdict: 90–100 = very clear-cut evidence in the policy text, 60–89 = reasonable evidence but some ambiguity, 30–59 = limited or implied evidence, 0–29 = very uncertain or contradictory signals.
 - Do not infer or assume information not present in the policy text.
 - Do not use knowledge of the DPDP Act beyond what is provided in the retrieved clauses above.
