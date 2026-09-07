@@ -2,8 +2,6 @@
 
 An automated, RAG-grounded regulatory audit platform that evaluates startup privacy policies against India's **Digital Personal Data Protection (DPDP) Act, 2023** using dual-model comparative LLM analysis (**Gemini 3.7 Flash** vs **Gemini 3.5 Flash**).
 
-Built as a college project for a Prompt Engineering course.
-
 ---
 
 ## 🚀 Key Features
