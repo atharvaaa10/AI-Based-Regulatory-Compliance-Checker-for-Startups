@@ -17,11 +17,11 @@ import logging
 
 logging.basicConfig(level=logging.WARNING)  # suppress info noise during test
 
-from backend.config.loader import load_checklist, load_prompt_template
+from backend.config.loader import load_checklist, load_batched_prompt_template
 from backend.llm.gemini_client import call_model_a, call_model_b, MODEL_A_NAME, MODEL_B_NAME
-from backend.llm.prompt_builder import build_prompt
+from backend.llm.prompt_builder import build_batched_prompt
 from backend.rag.retriever import retrieve_relevant_clauses
-from backend.api.compliance import _parse_result, _compute_score, _call_with_retry
+from backend.api.compliance import _parse_batched_results, _compute_score, _call_with_retry
 
 SEP  = "=" * 72
 ISEP = "-" * 72
@@ -116,48 +116,49 @@ All customer personal data is hosted and stored on secure servers located within
 
 def evaluate_policy(policy_name: str, policy_text: str):
     checklist = load_checklist()
-    template  = load_prompt_template()
+    template  = load_batched_prompt_template()
 
     print(f"\n{SEP}")
     print(f"  E2E TEST — {policy_name}")
     print(f"  {len(checklist)} checklist items | Models: {MODEL_A_NAME} vs {MODEL_B_NAME}")
     print(SEP)
 
-    results_a = []
-    results_b = []
-    item_times = []
+    # 1. Pre-retrieve grounding clauses
+    print("\n  [1/3] Retrieving grounding clauses for all 15 items...")
+    item_clauses_map = {}
+    ctx_sids_map = {}
+    for item in checklist:
+        clauses = retrieve_relevant_clauses(item["query"], top_k=4)
+        item_clauses_map[item["id"]] = clauses
+        ctx_sids_map[item["id"]] = [c["section_id"] for c in clauses]
 
-    for idx, item in enumerate(checklist, 1):
-        t_item = time.perf_counter()
-        print(f"\n  [{idx:02d}/{len(checklist)}] {item['id']} ... ", end="", flush=True)
+    # 2. Build single combined prompt
+    print("  [2/3] Assembling combined batched prompt...")
+    batched_prompt = build_batched_prompt(template, checklist, item_clauses_map, policy_text)
+    prompt_tokens = int(len(batched_prompt.split()) * 1.3)
+    print(f"        Prompt size: {len(batched_prompt):,} chars | ~{prompt_tokens:,} tokens")
 
-        clauses   = retrieve_relevant_clauses(item["query"], top_k=5)
-        prompt    = build_prompt(template, item["requirement"], clauses, policy_text)
-        ctx_sids  = [c["section_id"] for c in clauses]   # valid section IDs for citation check
+    # 3. Call both models in parallel (1 call per model!)
+    print(f"  [3/3] Calling {MODEL_A_NAME} and {MODEL_B_NAME} concurrently...")
+    t0 = time.perf_counter()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            fa = ex.submit(_call_with_retry, call_model_a, batched_prompt)
+            fb = ex.submit(_call_with_retry, call_model_b, batched_prompt)
+            raw_a = fa.result(timeout=120)
+            raw_b = fb.result(timeout=120)
+    except Exception as e:
+        print(f"API ERROR: {e}")
+        sys.exit(1)
 
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-                fa = ex.submit(_call_with_retry, call_model_a, prompt)
-                fb = ex.submit(_call_with_retry, call_model_b, prompt)
-                raw_a = fa.result(timeout=120)
-                raw_b = fb.result(timeout=120)
-        except Exception as e:
-            print(f"API ERROR: {e}")
-            sys.exit(1)
+    total_time = time.perf_counter() - t0
+    avg_time = total_time / len(checklist)
+    print(f"        Execution completed in {total_time:.2f}s ({avg_time:.2f}s/item amortized)!")
 
-        ra = _parse_result(item, raw_a)
-        rb = _parse_result(item, raw_b)
-        results_a.append((ra, ctx_sids))
-        results_b.append((rb, ctx_sids))
-
-        elapsed = time.perf_counter() - t_item
-        item_times.append(elapsed)
-        print(f"A={ra.status[:2]}({ra.confidence})  B={rb.status[:2]}({rb.confidence})  [{elapsed:.1f}s]")
-
-        # Inter-item delay to respect 5 RPM free-tier rate limit
-        if item is not checklist[-1]:
-            print(f"       (waiting 13s for rate limit...)")
-            time.sleep(13)
+    all_results_a = _parse_batched_results(checklist, raw_a)
+    all_results_b = _parse_batched_results(checklist, raw_b)
+    results_a = [(r, ctx_sids_map.get(r.id, [])) for r in all_results_a]
+    results_b = [(r, ctx_sids_map.get(r.id, [])) for r in all_results_b]
 
     # -----------------------------------------------------------------------
     # Full results table
@@ -165,9 +166,6 @@ def evaluate_policy(policy_name: str, policy_text: str):
     print(f"\n{SEP}")
     print("  FULL RESULTS")
     print(SEP)
-
-    all_results_a = [r for r, _ in results_a]
-    all_results_b = [r for r, _ in results_b]
 
     STATUS_MAP = {"Me": "Met", "Pa": "Partially Met", "Mi": "Missing"}
 
@@ -226,8 +224,7 @@ def evaluate_policy(policy_name: str, policy_text: str):
     agreement_rate = round(matched / n * 100, 1)
     disagreements = [(a.id, a.status, b.status) for a, b in zip(all_results_a, all_results_b) if a.status != b.status]
 
-    total_time = sum(item_times)
-    avg_time   = total_time / len(item_times)
+    # Timing already captured as total_time and avg_time above
 
     print(f"\n{SEP}")
     print("  AGGREGATE SUMMARY")

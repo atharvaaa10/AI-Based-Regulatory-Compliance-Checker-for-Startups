@@ -46,13 +46,11 @@ _client = genai.Client(api_key=_api_key)
 
 # Shared generation config:
 #   temperature=0.1          → near-deterministic, consistent JSON output
-#   max_output_tokens=2048   → generous budget (1024 caused truncation on long reason fields)
-#   response_mime_type       → forces raw JSON output only — no chain-of-thought,
-#                              no markdown fences, no reasoning text before the JSON.
-#                              Critical for gemini-3.5-flash which does visible thinking.
+#   max_output_tokens=8192   → generous budget for all 15 items with reasons and fixes (expected ~2,500-3,200 tokens)
+#   response_mime_type       → forces raw JSON output only — no markdown fences, no reasoning text before the JSON
 _gen_config = types.GenerateContentConfig(
     temperature=0.1,
-    max_output_tokens=4096,
+    max_output_tokens=8192,
     response_mime_type="application/json",
 )
 
