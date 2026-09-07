@@ -1,35 +1,38 @@
 """
-gemini_client.py — Thin wrapper around the Google Gemini generative AI SDK.
+gemini_client.py — Thin wrapper around the Google Gemini SDK (google-genai).
 
-Two model singletons are initialised at module load time:
-    MODEL_A — gemini-3.7-flash  (newer, used as the primary analysis model)
-    MODEL_B — gemini-3.5-flash  (used as the comparison model)
+Two models are used:
+    MODEL_A — gemini-3.7-flash  (primary analysis model)
+    MODEL_B — gemini-3.5-flash  (comparison model)
 
 Both are free-tier; no billing required.
 
-The client reads GEMINI_API_KEY from the environment (loaded via python-dotenv
-in main.py). If the key is missing, a clear error is raised at startup rather
-than at the first API call.
+Uses the current google-genai package (google.genai), which replaced the
+deprecated google.generativeai package.
+
+Free-tier rate limit: 5 requests per minute per model.
+The compliance pipeline adds a 13-second inter-item delay to stay within limits.
 """
 
 import os
+from pathlib import Path
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
-# Load .env from the project root (two levels above this file: llm/ -> backend/ -> root)
-from pathlib import Path
+# Load .env from the project root (two levels above: llm/ -> backend/ -> root)
 load_dotenv(dotenv_path=Path(__file__).parents[2] / ".env")
 
 # ---------------------------------------------------------------------------
 # Model identifiers
 # ---------------------------------------------------------------------------
 
-MODEL_A_NAME = "gemini-3.7-flash"
-MODEL_B_NAME = "gemini-3.5-flash"
+MODEL_A_NAME = os.environ.get("GEMINI_MODEL_A", "gemini-3.7-flash")
+MODEL_B_NAME = os.environ.get("GEMINI_MODEL_B", "gemini-3.5-flash")
 
 # ---------------------------------------------------------------------------
-# SDK configuration and model singletons
+# SDK client (stateless — one client, two model names)
 # ---------------------------------------------------------------------------
 
 _api_key = os.environ.get("GEMINI_API_KEY")
@@ -39,21 +42,18 @@ if not _api_key:
         "Create a .env file in the project root with: GEMINI_API_KEY=your_key_here"
     )
 
-genai.configure(api_key=_api_key)
+_client = genai.Client(api_key=_api_key)
 
-# Generation config — low temperature for deterministic compliance judgements
-_generation_config = genai.GenerationConfig(
-    temperature=0.1,        # near-deterministic; high temp causes inconsistent JSON
-    max_output_tokens=512,  # each response is a small JSON object
-)
-
-_model_a = genai.GenerativeModel(
-    model_name=MODEL_A_NAME,
-    generation_config=_generation_config,
-)
-_model_b = genai.GenerativeModel(
-    model_name=MODEL_B_NAME,
-    generation_config=_generation_config,
+# Shared generation config:
+#   temperature=0.1          → near-deterministic, consistent JSON output
+#   max_output_tokens=2048   → generous budget (1024 caused truncation on long reason fields)
+#   response_mime_type       → forces raw JSON output only — no chain-of-thought,
+#                              no markdown fences, no reasoning text before the JSON.
+#                              Critical for gemini-3.5-flash which does visible thinking.
+_gen_config = types.GenerateContentConfig(
+    temperature=0.1,
+    max_output_tokens=2048,
+    response_mime_type="application/json",
 )
 
 
@@ -64,18 +64,24 @@ _model_b = genai.GenerativeModel(
 def call_model_a(prompt: str) -> str:
     """
     Send a prompt to gemini-3.7-flash (Model A) and return the raw text response.
-
-    Raises google.api_core.exceptions.GoogleAPIError on network/quota failures.
+    Raises google.genai errors on network/quota failures (caught in compliance.py).
     """
-    response = _model_a.generate_content(prompt)
+    response = _client.models.generate_content(
+        model=MODEL_A_NAME,
+        contents=prompt,
+        config=_gen_config,
+    )
     return response.text
 
 
 def call_model_b(prompt: str) -> str:
     """
     Send a prompt to gemini-3.5-flash (Model B) and return the raw text response.
-
-    Raises google.api_core.exceptions.GoogleAPIError on network/quota failures.
+    Raises google.genai errors on network/quota failures (caught in compliance.py).
     """
-    response = _model_b.generate_content(prompt)
+    response = _client.models.generate_content(
+        model=MODEL_B_NAME,
+        contents=prompt,
+        config=_gen_config,
+    )
     return response.text

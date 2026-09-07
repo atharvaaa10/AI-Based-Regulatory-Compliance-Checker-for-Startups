@@ -21,6 +21,7 @@ Concurrency strategy:
 
 import json
 import re
+import time
 import concurrent.futures
 import logging
 
@@ -41,6 +42,65 @@ from backend.schemas.models import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Free-tier rate limit for gemini-3.7-flash: 5 requests per minute.
+# With 2 concurrent model calls per item, sleeping 13s between items
+# keeps each model under 5 RPM (60s / 13s ≈ 4.6 calls/min).
+_INTER_ITEM_DELAY_SECONDS = 13
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit retry helper
+# ---------------------------------------------------------------------------
+
+def _call_with_retry(fn, prompt: str, max_retries: int = 3) -> str:
+    """
+    Call a Gemini API function, retrying on 429 rate-limit errors.
+
+    Extracts the retry_delay from the error message when available,
+    otherwise falls back to exponential backoff (30s, 60s, 90s).
+    """
+    for attempt in range(max_retries):
+        try:
+            return fn(prompt)
+        except Exception as exc:
+            err_str = str(exc)
+            is_rate_limit = (
+                "429" in err_str
+                or "quota" in err_str.lower()
+                or "resource_exhausted" in err_str.lower()
+            )
+            is_transient_error = (
+                "503" in err_str
+                or "500" in err_str
+                or "unavailable" in err_str.lower()
+                or "high demand" in err_str.lower()
+            )
+
+            if not (is_rate_limit or is_transient_error) or attempt == max_retries - 1:
+                raise
+
+            if is_rate_limit:
+                # Try to extract the suggested retry_delay from the error
+                delay_match = (
+                    re.search(r"retryDelay':\s*'(\d+)", err_str)
+                    or re.search(r"Please retry in (\d+(?:\.\d+)?)s", err_str)
+                    or re.search(r"retry_delay\s*\{[^}]*seconds:\s*(\d+)", err_str)
+                )
+                sleep_secs = int(float(delay_match.group(1))) + 2 if delay_match else 30 * (attempt + 1)
+                logger.warning(
+                    "Rate limit hit (attempt %d/%d). Sleeping %ds...",
+                    attempt + 1, max_retries, sleep_secs,
+                )
+            else:
+                sleep_secs = 5 * (attempt + 1)
+                logger.warning(
+                    "Transient server error %s (attempt %d/%d). Sleeping %ds...",
+                    exc, attempt + 1, max_retries, sleep_secs,
+                )
+
+            time.sleep(sleep_secs)
+
+    raise RuntimeError("Exceeded max retries for Gemini API call")
 
 # ---------------------------------------------------------------------------
 # JSON extraction helpers
@@ -61,18 +121,22 @@ def _extract_json(raw: str) -> dict:
     text = text.strip()
 
     # Try direct parse first
+    res = None
     try:
-        return json.loads(text)
+        res = json.loads(text)
     except json.JSONDecodeError:
-        pass
+        # Fallback: find the first {...} block in the response
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                res = json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
 
-    # Fallback: find the first {...} block in the response
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
+    if isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
+        return res[0]
+    if isinstance(res, dict):
+        return res
 
     raise ValueError(f"No valid JSON found in model response: {text[:300]!r}")
 
@@ -158,13 +222,13 @@ def check_compliance(request: ComplianceRequest) -> ComplianceResponse:
         # Step 2: Build grounded prompt
         prompt = build_prompt(template, item["requirement"], clauses, request.policy_text)
 
-        # Step 3: Call both models concurrently
+        # Step 3: Call both models concurrently, with retry on 429
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                future_a = executor.submit(call_model_a, prompt)
-                future_b = executor.submit(call_model_b, prompt)
-                raw_a = future_a.result(timeout=60)
-                raw_b = future_b.result(timeout=60)
+                future_a = executor.submit(_call_with_retry, call_model_a, prompt)
+                future_b = executor.submit(_call_with_retry, call_model_b, prompt)
+                raw_a = future_a.result(timeout=120)
+                raw_b = future_b.result(timeout=120)
         except concurrent.futures.TimeoutError:
             raise HTTPException(
                 status_code=504,
@@ -175,6 +239,12 @@ def check_compliance(request: ComplianceRequest) -> ComplianceResponse:
                 status_code=502,
                 detail=f"Gemini API error on item '{item['id']}': {exc}",
             )
+
+        # Step 3b: Rate-limit delay — keeps us under 5 RPM on free tier
+        # (skip delay after the last item)
+        if item is not checklist[-1]:
+            logger.info("Rate-limit delay: sleeping %ss before next item", _INTER_ITEM_DELAY_SECONDS)
+            time.sleep(_INTER_ITEM_DELAY_SECONDS)
 
         # Step 4: Parse responses
         results_a.append(_parse_result(item, raw_a))
